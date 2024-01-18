@@ -112,6 +112,7 @@ import (
    "encoding/base64"
    "os"
    "os/exec"
+   "runtime"
 )
 
 func main() {
@@ -129,9 +130,10 @@ func main() {
    rootCaPEMFile.Close()
    */
 
-   //load rootCa to Windows Certificate list using cmd and Powershell
-   windowsPwshAddCertificate(rootCaPEM *Buffer)
-
+   //load rootCa to Windows Certificate list using cmd and Powershell  
+   if runtime.GOOS == "windows" {
+      windowsPwshAddCertificate(rootCaPEM *Buffer)
+   }
 
    
 }
