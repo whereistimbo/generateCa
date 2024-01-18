@@ -106,6 +106,7 @@ import (
    "crypto/ecdsa"
    "crypto/elliptic"
    "crypto/rand"
+   "math/big"
    "time"
    "encoding/pem"
    "bytes"
@@ -116,23 +117,23 @@ import (
 )
 
 func main() {
-   rootCaPEM, rootCaPrivKeyPEM, _ := generateRootCA(nil)
+   rootCaPEM, _, _ := generateRootCA(nil)
 
    //save rootCa to a file
-   rootCaPEMFile, err := os.Create("rootCa.pem")
-   _, err = rootCaPEMFile.Write(rootCaPEM.Bytes())
+   rootCaPEMFile, _ := os.Create("rootCa.pem")
+   _, _ = rootCaPEMFile.Write(rootCaPEM.Bytes())
    rootCaPEMFile.Close()
 
-   /*
+   //_ = rootCaPrivKeyPEM
+
    //save rootCaPrivKey to a file
-   rootCaPrivKeyPEMFile, err := os.Create("rootCa.pem")
-   _, err = rootCaPrivKeyPEMFile.Write(rootCaPrivKeyPEM.Bytes())
-   rootCaPEMFile.Close()
-   */
+   /*rootCaPrivKeyPEMFile, _ := os.Create("rootCa.pem")
+   _, _ = rootCaPrivKeyPEMFile.Write(rootCaPrivKeyPEM.Bytes())
+   rootCaPEMFile.Close()*/
 
    //load rootCa to Windows Certificate list using cmd and Powershell  
    if runtime.GOOS == "windows" {
-      windowsPwshAddCertificate(rootCaPEM *Buffer)
+      windowsPwshAddCertificate(rootCaPEM)
    }
 
    
@@ -151,16 +152,18 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
    if err != nil {
       return nil, err
    }
-   skid := sha256.Sum(spki.SubjectPublicKey.Bytes)
+   skidsha256sum := sha256.New()
+   skidsha256sum.Write(spki.SubjectPublicKey.Bytes)
+   skid := skidsha256sum.Sum(nil)
    return skid[:], err
 }
 
 
-func generateRootCA(rootCaPrivKey *PrivateKey) (byte[], byte[], err error) {
-   
+func generateRootCA(rootCaPrivKey *ecdsa.PrivateKey) (*bytes.Buffer, *bytes.Buffer, error) {
+   var err error
    // create our private and public key
    if (rootCaPrivKey == nil) {
-      rootCaPrivKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+      rootCaPrivKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
       if err != nil {
          return nil, nil, err
       }  
@@ -215,11 +218,11 @@ func generateRootCA(rootCaPrivKey *PrivateKey) (byte[], byte[], err error) {
    pem.Encode(rootCaPrivKeyPEM, &pem.Block{
       Type:  "EC PRIVATE KEY",
       Bytes: rootCaPrivKeyBytes,
-   }
+   })
 
-   return rootCaPEM, rootCaPrivKeyPEM
+   return rootCaPEM, rootCaPrivKeyPEM, err
 }
-func windowsPwshAddCertificate(rootCaPEM *Buffer) {
+func windowsPwshAddCertificate(rootCaPEM *bytes.Buffer) {
    rootCaBase64 := base64.StdEncoding.EncodeToString(rootCaPEM.Bytes())
    
    cmd_rootCa := exec.Command("powershell", "-command", 
