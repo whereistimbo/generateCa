@@ -126,28 +126,15 @@ func main() {
    var rootCaPrivKeyPEMFileLoc = flag.String("rootCaPrivKey", "rootCaPrivKey.pem", "rootCaPrivKey PEM location")
    flag.Parse()
 
-   //fmt.Println(*rootCaPEMFileLoc)
-   //fmt.Println(*rootCaPrivKeyPEMFileLoc)
-   //open the rootCa using the previous command line args
-   //rootCaPEMFile, err := os.Open(*rootCaPEMFileLoc)
-   //rootCaPrivKeyPEMFile, err := os.Open(*rootCaPrivKeyPEMFileLoc)
-
+   //open the rootCaPEM using the previous command line args
    rootCaPEM, err := os.ReadFile(*rootCaPEMFileLoc)
    if err != nil {
       log.Fatal(err)
    }
-   //os.Stdout.Write(rootCaPEM)
    rootCaPrivKeyPEM, err := os.ReadFile(*rootCaPrivKeyPEMFileLoc)
    if err != nil {
       log.Fatal(err)
    }
-   //os.Stdout.Write(rootCaPrivKeyPEM)
-   //read the file and close
-   /*var rootCaPEM, rootCaPrivKeyPEM []byte
-   _, err := rootCaPEMFile.Read(rootCaPEM)
-   _, err := rootCaPrivKeyPEMFile.Read(rootCaPrivKeyPEM)
-   rootCaPEMFile.Close()
-   rootCaPrivKeyPEMFile.Close()*/
 
    //decode PEM file
    rootCaBlock, _ := pem.Decode(rootCaPEM)
@@ -163,28 +150,21 @@ func main() {
    rootCa, _ := x509.ParseCertificate(rootCaBlock.Bytes)
    rootCaPrivKey, _ := x509.ParseECPrivateKey(rootCaPrivKeyBlock.Bytes)
 
-   //fmt.Println(rootCa, rootCaPrivKey)
-
    intCaPEM, intCaPrivKeyPEM, _ := generateIntCA(rootCa, rootCaPrivKey, nil)
-   fmt.Println("here")
 
    //save intCa to a file
    intCaPEMFile, _ := os.Create("intCa.pem")
    _, _ = intCaPEMFile.Write(intCaPEM.Bytes())
    intCaPEMFile.Close()
-   fmt.Println("here2")
-   //_ = intCaPrivKeyPEM
 
    //save intCaPrivKey to a file
    intCaPrivKeyPEMFile, _ := os.Create("intCaPrivKey.pem")
    _, _ = intCaPrivKeyPEMFile.Write(intCaPrivKeyPEM.Bytes())
    intCaPrivKeyPEMFile.Close()
-   fmt.Println("here2")
 
-   //load rootCa to Windows Certificate list using cmd and Powershell  
+   //load intCa to Windows Certificate list using cmd and Powershell  
    if runtime.GOOS == "windows" {
       windowsPwshAddCertificate(intCaPEM)
-      fmt.Println("here3")
    }
 
    
@@ -252,7 +232,7 @@ func generateIntCA(rootCa *x509.Certificate, rootCaPrivKey *ecdsa.PrivateKey, in
    }
 
    // create the CA
-   rootCaBytes, err := x509.CreateCertificate(rand.Reader, intCa, rootCa, &intCaPrivKey.PublicKey, rootCaPrivKey)
+   intCaBytes, err := x509.CreateCertificate(rand.Reader, intCa, rootCa, &intCaPrivKey.PublicKey, rootCaPrivKey)
    if err != nil {
       return nil, nil, err
    }
@@ -261,7 +241,7 @@ func generateIntCA(rootCa *x509.Certificate, rootCaPrivKey *ecdsa.PrivateKey, in
    intCaPEM := new(bytes.Buffer)
    pem.Encode(intCaPEM, &pem.Block{
       Type:  "CERTIFICATE",
-      Bytes: rootCaBytes,
+      Bytes: intCaBytes,
    })
 
    //pem encode private key
@@ -275,7 +255,6 @@ func generateIntCA(rootCa *x509.Certificate, rootCaPrivKey *ecdsa.PrivateKey, in
 }
 func windowsPwshAddCertificate(intCaPEM *bytes.Buffer) {
    intCaBase64 := base64.StdEncoding.EncodeToString(intCaPEM.Bytes())
-   fmt.Println(intCaBase64)
    cmd_intCa := exec.Command("powershell", "-command", 
       "$intca = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Convert]::FromBase64String(\""+ intCaBase64 +"\"));", 
       "$intstore = [System.Security.Cryptography.X509Certificates.X509Store]::new(\"CA\",\"CurrentUser\");",
