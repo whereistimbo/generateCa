@@ -103,9 +103,8 @@ import (
    "log"
    "encoding/pem"
    "crypto/x509"
-   "runtime"
-   "os/exec"
    "crypto"
+   "net"
    "crypto/x509/pkix"
    "encoding/asn1"
    "crypto/sha256"
@@ -115,58 +114,50 @@ import (
    "math/big"
    "time"
    "bytes"
-   "encoding/base64"
-   "fmt"
 )
 
 func main() {
 
    //command line args
-   var rootCaPEMFileLoc = flag.String("rootCa", "rootCa.pem", "rootCa PEM location")
-   var rootCaPrivKeyPEMFileLoc = flag.String("rootCaPrivKey", "rootCaPrivKey.pem", "rootCaPrivKey PEM location")
+   var intCaPEMFileLoc = flag.String("intCa", "intCa.pem", "intCa PEM location")
+   var intCaPrivKeyPEMFileLoc = flag.String("intCaPrivKey", "intCaPrivKey.pem", "intCaPrivKey PEM location")
    flag.Parse()
 
-   //open the rootCaPEM using the previous command line args
-   rootCaPEM, err := os.ReadFile(*rootCaPEMFileLoc)
+   //open the intCaPEM using the previous command line args
+   intCaPEM, err := os.ReadFile(*intCaPEMFileLoc)
    if err != nil {
       log.Fatal(err)
    }
-   rootCaPrivKeyPEM, err := os.ReadFile(*rootCaPrivKeyPEMFileLoc)
+   intCaPrivKeyPEM, err := os.ReadFile(*intCaPrivKeyPEMFileLoc)
    if err != nil {
       log.Fatal(err)
    }
 
    //decode PEM file
-   rootCaBlock, _ := pem.Decode(rootCaPEM)
-   if rootCaBlock == nil || rootCaBlock.Type != "CERTIFICATE" {
-      log.Fatal("failed to decode rootCa")
+   intCaBlock, _ := pem.Decode(intCaPEM)
+   if intCaBlock == nil || intCaBlock.Type != "CERTIFICATE" {
+      log.Fatal("failed to decode intCa")
    }
-   rootCaPrivKeyBlock, _ := pem.Decode(rootCaPrivKeyPEM)
-   if rootCaPrivKeyBlock == nil || rootCaPrivKeyBlock.Type != "EC PRIVATE KEY" {
-      log.Fatal("failed to decode rootCaPrivKey")
+   intCaPrivKeyBlock, _ := pem.Decode(intCaPrivKeyPEM)
+   if intCaPrivKeyBlock == nil || intCaPrivKeyBlock.Type != "EC PRIVATE KEY" {
+      log.Fatal("failed to decode intCaPrivKey")
    }
 
    //parse certificate and private key
-   rootCa, _ := x509.ParseCertificate(rootCaBlock.Bytes)
-   rootCaPrivKey, _ := x509.ParseECPrivateKey(rootCaPrivKeyBlock.Bytes)
+   intCa, _ := x509.ParseCertificate(intCaBlock.Bytes)
+   intCaPrivKey, _ := x509.ParseECPrivateKey(intCaPrivKeyBlock.Bytes)
 
-   intCaPEM, intCaPrivKeyPEM, _ := generateIntCa(rootCa, rootCaPrivKey, nil)
+   serverCertPEM, serverCertPrivKeyPEM, _ := generateServerCert(intCa, intCaPrivKey, nil)
 
    //save intCa to a file
-   intCaPEMFile, _ := os.Create("intCa.pem")
-   _, _ = intCaPEMFile.Write(intCaPEM.Bytes())
-   intCaPEMFile.Close()
+   serverCertPEMFile, _ := os.Create("serverCert.pem")
+   _, _ = serverCertPEMFile.Write(serverCertPEM.Bytes())
+   serverCertPEMFile.Close()
 
    //save intCaPrivKey to a file
-   intCaPrivKeyPEMFile, _ := os.Create("intCaPrivKey.pem")
-   _, _ = intCaPrivKeyPEMFile.Write(intCaPrivKeyPEM.Bytes())
-   intCaPrivKeyPEMFile.Close()
-
-   //load intCa to Windows Certificate list using cmd and Powershell  
-   if runtime.GOOS == "windows" {
-      windowsPwshAddCertificate(intCaPEM)
-   }
-
+   serverCertPrivKeyPEMFile, _ := os.Create("serverCertPrivKey.pem")
+   _, _ = serverCertPrivKeyPEMFile.Write(serverCertPrivKeyPEM.Bytes())
+   serverCertPrivKeyPEMFile.Close()
    
 }
 
@@ -190,75 +181,67 @@ func calculateSKID(pubKey crypto.PublicKey) ([]byte, error) {
 }
 
 
-func generateIntCa(rootCa *x509.Certificate, rootCaPrivKey *ecdsa.PrivateKey, intCaPrivKey *ecdsa.PrivateKey) (*bytes.Buffer, *bytes.Buffer, error) {
+func generateServerCert(intCa *x509.Certificate, intCaPrivKey *ecdsa.PrivateKey, serverCertPrivKey *ecdsa.PrivateKey) (*bytes.Buffer, *bytes.Buffer, error) {
    var err error
    // create our private and public key
-   if (intCaPrivKey == nil) {
-      intCaPrivKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+   if (serverCertPrivKey == nil) {
+      serverCertPrivKey, err = ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
       if err != nil {
          return nil, nil, err
       }  
    }
-   intCaPrivKeyBytes, err := x509.MarshalECPrivateKey(intCaPrivKey)
+   serverCertPrivKeyBytes, err := x509.MarshalECPrivateKey(serverCertPrivKey)
    if err != nil {
       return nil, nil, err
    }
-   intCaskid, err := calculateSKID(&intCaPrivKey.PublicKey)
+   serverCertskid, err := calculateSKID(&serverCertPrivKey.PublicKey)
    if err != nil {
       return nil, nil, err
    }
 
    // set up our root CA certificate
-   intCa := &x509.Certificate{
+   serverCert := &x509.Certificate{
       Version: 1,
       SerialNumber: big.NewInt(2024),
       Subject: pkix.Name{
          Country:       []string{"ID"},
-         Organization:  []string{"Klinik Dokter Ananda's CA"},
-         OrganizationalUnit: []string{"Klinik Dokter Ananda's Intermediate CA"},
-         CommonName: "Klinik Dokter Ananda's Intermediate CA",
+         Organization:  []string{"Klinik Dokter Ananda's WebApp"},
+         OrganizationalUnit: []string{"Klinik Dokter Ananda's WebApp"},
+         CommonName: "Klinik Dokter Ananda's WebApp",
          Province:      []string{"JB"},
          Locality:      []string{"Depok"},
          StreetAddress: []string{"Kukusan Beji"},
          PostalCode:    []string{"16425"},
-      },
+      },    
+      IPAddresses:  []net.IP{net.IPv4(172, 19, 11, 1), net.IPv6loopback},
+      DNSNames: []string{"klinikdrananda.test", "klinikdrananda.localhost", "klinikdrananda.local"},
       NotBefore:             time.Now(),
-      NotAfter:              time.Now().AddDate(1, 1, 0),
-      IsCA:                  true,
-      SubjectKeyId: intCaskid,
-      KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign |
-      x509.KeyUsageCRLSign,
-      BasicConstraintsValid: true,
+      NotAfter:              time.Now().AddDate(0, 0, 7),
+      IsCA:                  false,
+      SubjectKeyId: serverCertskid,
+      ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+      KeyUsage:              x509.KeyUsageDigitalSignature,
    }
 
-   // create the CA
-   intCaBytes, err := x509.CreateCertificate(rand.Reader, intCa, rootCa, &intCaPrivKey.PublicKey, rootCaPrivKey)
+   // create the serverCert
+   serverCertBytes, err := x509.CreateCertificate(rand.Reader, serverCert, intCa, &serverCertPrivKey.PublicKey, intCaPrivKey)
    if err != nil {
       return nil, nil, err
    }
 
-   // pem encode cert public key
-   intCaPEM := new(bytes.Buffer)
-   pem.Encode(intCaPEM, &pem.Block{
+   // pem encode serverCert public key
+   serverCertPEM := new(bytes.Buffer)
+   pem.Encode(serverCertPEM, &pem.Block{
       Type:  "CERTIFICATE",
-      Bytes: intCaBytes,
+      Bytes: serverCertBytes,
    })
 
    //pem encode private key
-   intCaPrivKeyPEM := new(bytes.Buffer)
-   pem.Encode(intCaPrivKeyPEM, &pem.Block{
+   serverCertPrivKeyPEM := new(bytes.Buffer)
+   pem.Encode(serverCertPrivKeyPEM, &pem.Block{
       Type:  "EC PRIVATE KEY",
-      Bytes: intCaPrivKeyBytes,
+      Bytes: serverCertPrivKeyBytes,
    })
 
-   return intCaPEM, intCaPrivKeyPEM, err
-}
-func windowsPwshAddCertificate(intCaPEM *bytes.Buffer) {
-   intCaBase64 := base64.StdEncoding.EncodeToString(intCaPEM.Bytes())
-   cmd_intCa := exec.Command("powershell", "-command", 
-      "$intca = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Convert]::FromBase64String(\""+ intCaBase64 +"\"));", 
-      "$intstore = [System.Security.Cryptography.X509Certificates.X509Store]::new(\"CA\",\"CurrentUser\");",
-      "$intstore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite);",
-      "$intstore.Add($intca)")
-   _ = cmd_intCa.Run()
+   return serverCertPEM, serverCertPrivKeyPEM, err
 }
